@@ -109,7 +109,7 @@ sudo dnf install qt6-qtbase-devel qt6-qtmultimedia-devel gstreamer1-devel gstrea
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/qt-caster.git
+git clone https://github.com/Khyretos/qt-screen-caster.git
 cd qt-caster
 ```
 
