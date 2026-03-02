@@ -110,7 +110,7 @@ sudo dnf install qt6-qtbase-devel qt6-qtmultimedia-devel gstreamer1-devel gstrea
 
 ```bash
 git clone https://github.com/Khyretos/qt-screen-caster.git
-cd qt-caster
+cd qt-screen-caster
 ```
 
 ### 2. Configure with CMake
