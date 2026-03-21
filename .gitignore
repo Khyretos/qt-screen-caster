@@ -80,3 +80,6 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 /build*/
+.qt
+CMakeFiles
+cmake_install.cmake
