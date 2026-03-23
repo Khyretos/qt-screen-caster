@@ -38,6 +38,9 @@ As a software engineer with limited C++ expertise, I directed the development of
   - Opus application (`audio`, `voip`, `lowdelay`)
 - **📛 Custom Stream Names** – Give your streams human‑readable names; otherwise auto‑named (`qt-caster-video-1`, …)
 - **📌 Pin & Save Streams** – Check the **Pin** column to save a stream permanently. Pinned streams are saved to `~/.config/qt-caster/saved-streams.json` and restart automatically when the app launches.
+- **✏️ Edit Running Streams** – Right‑click any active stream to modify its configuration (video or audio) and restart it with the new settings.
+- **👁️ Video Preview** – For video streams, right‑click and select “Visualize Stream” to open a separate window showing the captured video (uses the same PipeWire source).
+- **🎚️ Virtual Sink (Audio)** – When creating an audio stream, check “Create virtual sink” to create a PulseAudio null sink and automatically route the stream through it. This makes the audio available to other applications for further processing.
 - **🖥️ Live Stream Table** – View all active streams with status, destination, options, and live activity indicator (🟢/🔴)
 - **🖱️ System Tray Integration** – Minimize to tray, right‑click to manage streams, click to show window
 - **🧹 Clean Shutdown** – Gracefully terminates all GStreamer processes on quit (Ctrl+C, tray quit, window close)
@@ -122,12 +125,31 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 
 ### 3. Build
 
+#### Cmake
+
 ```bash
-make -j$(nproc) # Linux/macOS
-cmake --build . --config Release # Windows
+git clone https://github.com/Khyretos/qt-screen-caster.git
+cd qt-screen-caster
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
 ```
 
-After successful build, you will have two executables:
+#### Ninja
+
+```bash
+git clone https://github.com/Khyretos/qt-screen-caster.git
+cd qt-screen-caster
+rm -rf build
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_C_COMPILER=/usr/bin/clang \
+      -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+      -G Ninja ..
+ninja
+```
+
+After successful build, you will have two executables in the build/ directory:
 
 `qt-caster` – Main GUI application
 
@@ -135,26 +157,23 @@ After successful build, you will have two executables:
 
 ## 📦 Packaging – Create a Portable AppImage (Linux)
 
-Qt-Caster can be bundled into a single, dependency‑free AppImage using linuxdeploy and its plugins.
+Qt-Caster can be bundled into a single, dependency‑free AppImage using a Docker‑based build process. This ensures the environment is consistent and reproducible.
 
-### 1- Download linuxdeploy and plugins:
+### 1. Install Docker (if not already installed)
 
-```bash
-wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-wget https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-wget https://github.com/linuxdeploy/linuxdeploy-plugin-gstreamer/releases/download/continuous/linuxdeploy-plugin-gstreamer-x86_64.AppImage
-chmod +x \*.AppImage
-```
+Follow the official instructions for your distribution: [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/). Make sure the Docker daemon is running.
 
-### 2- Run the deployment script:
+### 2. Build the AppImage
+
+The repository includes a `Dockerfile.appimage` and a `build-appimage.sh` script. Simply run:
 
 ```bash
-./package.sh
+./build-appimage.sh
 ```
 
-The script creates `Qt-Caster-x86_64.AppImage` in the project root.
+The script builds the Docker image, compiles the application inside, and creates the AppImage. Once finished, the AppImage will be located in the dist/ folder inside the project root.
 
-**Note:** The AppImage bundles **everything** – Qt, GStreamer, and all required plugins. It runs on any Linux distribution **without** installing GStreamer or Qt.
+**Note:** The AppImage bundles **everything** – Qt, GStreamer, and all required plugins. It runs on any modern Linux distribution **without** needing to install GStreamer or Qt separately. The first build may take a few minutes as it downloads the base image and dependencies. Subsequent builds will be faster due to Docker caching.
 
 ## 🚀 Usage
 
@@ -167,31 +186,59 @@ The script creates `Qt-Caster-x86_64.AppImage` in the project root.
 
 ### Creating a Stream
 
-1. Click 🎥 Create Video Stream or 🎤 Create Audio Stream.
-2. Configure the stream parameters.
-3. (Optional) Enter a custom name.
-4. Click ✅ Start.
-5. If streaming a screen, the PipeWire portal will appear – select a screen/window.
+1. Click 🎥 **Create Video Stream** or 🎤 **Create Audio Stream.**
+
+2. Configure the stream parameters:
+
+   - **Video:** resolution, bitrate, encoder (hardware/software), tuning options.
+
+   - **Audio:** codec (Opus/AAC), bitrate, channels, sample rate, direction (outgoing/incoming).
+
+3. (Optional) Enter a **custom name** – otherwise an auto‑name is assigned (e.g., `qt-caster-video-1`).
+
+4. For audio streams, you can optionally enable **Create virtual sink** and provide a custom sink name. This creates a PulseAudio null sink and automatically routes the stream through it, making the audio available to other applications.
+
+5. Click ✅ **Start.**
+
+6. If streaming a screen, the PipeWire portal will appear – select a screen or window to capture.
 
 ### Managing Streams
 
-- Double‑click a row → stops and removes that stream.
-- Pin checkbox → saves the stream configuration; it will auto‑start next time.
-- System Tray → right‑click for quick actions; hover for stream list.
+The main window displays all active streams in a table. You can:
+
+- **Double‑click** any row → stops and removes that stream.
+
+- **Pin** a stream by checking the 📌 column → the configuration is saved to `~/.config/qt-caster/saved-streams.json` and the stream will automatically restart when the application launches.
+
+- **Right‑click** a row to open a context menu with additional options:
+
+  - ✏️ **Edit Stream** – modify the stream’s configuration (video or audio). The stream will be restarted with the new settings.
+
+  - 👁️ **Visualize Stream** (video only) – opens a separate window showing the captured video (using the same PipeWire source). Useful to verify you are sharing the correct screen/window.
+
+- **System Tray** – right‑click the tray icon for quick actions, or hover to see a list of active streams.
+
+### Virtual Sink for Audio
+
+When you enable “Create virtual sink” in the audio stream dialog, a PulseAudio null sink is created (e.g., `qt-caster-stream-name`). The audio stream is connected to that sink:
+
+For **outgoing** streams, the source is the sink’s monitor (i.e., the virtual sink acts as an input source for other applications).
+
+For **incoming** streams, the sink is used as the playback device, allowing you to capture the received audio separately.
+
+You can manage the sink with standard PulseAudio tools (`pactl list sinks`, `pavucontrol`). The sink is automatically removed when the stream stops.
 
 ### Stopping the Application
 
-- Click ⏹ Quit Application – all streams are terminated gracefully.
-- Press Ctrl+C in the terminal – same clean shutdown.
+- Click ⏹ **Quit Application** – all streams are terminated gracefully.
+- Press **Ctrl+C** in the terminal – same clean shutdown.
 - Click the window close button (X) – minimizes to tray (unless quitting).
 
 ## 📁 Configuration & Saved Streams
 
 Pinned streams are stored in:
 
-- Linux: ~/.config/qt-caster/saved-streams.json
-- macOS: ~/Library/Application Support/Qt-Caster/saved-streams.json
-- Windows: %APPDATA%\Qt-Caster\saved-streams.json
+- Linux: `~/.config/qt-caster/saved-streams.json`
 
 The file is plain JSON. You can edit it manually, but it’s easier to use the Pin checkbox in the UI.
 
@@ -215,7 +262,7 @@ Contributions are welcome! Please follow these steps:
 4. Push to the branch (git push origin feature/amazing-feature).
 5. Open a Pull Request.
 
-### Coding style:
+### Coding style
 
 - Use 4 spaces for indentation.
 - Follow Qt naming conventions (camelCase for methods, PascalCase for classes).

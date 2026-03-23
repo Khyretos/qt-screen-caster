@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Qt-Caster
+Comment=Stream your screen and audio over UDP
+Exec=qt-caster
+Icon=qt-caster
+Terminal=false
+Categories=AudioVideo;Network;

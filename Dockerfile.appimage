@@ -1,0 +1,146 @@
+# Use the official Qt6 base image
+FROM stateoftheartio/qt6:6.5-gcc-aqt AS builder
+
+# Switch to root to install system dependencies
+USER root
+
+# Install required system dependencies (build tools, GStreamer, PulseAudio, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    make \
+    g++ \
+    pkg-config \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    gstreamer1.0-tools \
+    libpulse-dev \
+    libx11-xcb-dev \
+    libxcb-keysyms1-dev \
+    libxcb-image0-dev \
+    libxcb-shm0-dev \
+    libxcb-icccm4-dev \
+    libxcb-sync-dev \
+    libxcb-xfixes0-dev \
+    libxcb-shape0-dev \
+    libxcb-randr0-dev \
+    libxcb-render-util0-dev \
+    libxcb-xinerama0-dev \
+    libxcb-xinput-dev \
+    libxcb-xkb-dev \
+    libxkbcommon-dev \
+    patchelf \
+    file \
+    wget \
+    python3 \
+    python3-pip \
+    python3-dev \
+    python3-typing-extensions \
+    && apt-get clean
+
+# Upgrade typing_extensions to a version that supports TypeAlias
+RUN pip3 install --upgrade typing_extensions
+
+# Upgrade pip and install aqt
+RUN pip3 install --upgrade pip setuptools wheel && \
+    pip3 install --no-cache-dir aqtinstall
+
+# Install Qt Multimedia module using aqt
+RUN aqt install-qt linux desktop 6.5.0 -m qtmultimedia --outputdir /opt/Qt
+
+# Set working directory
+WORKDIR /app
+
+# Copy the entire source code
+COPY . /app
+
+# Build the application
+RUN rm -rf build && mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr && \
+    make -j$(nproc)
+
+# Create AppDir structure
+RUN mkdir -p build/AppDir/usr/bin
+
+# Copy binaries
+RUN cp build/qt-caster build/AppDir/usr/bin/ && \
+    cp build/qt-caster-worker build/AppDir/usr/bin/
+
+# Copy desktop file and icon (multiple locations for robustness)
+COPY qt-caster.desktop /app/build/AppDir/usr/share/applications/
+COPY qt-caster.png /app/build/AppDir/usr/share/icons/hicolor/256x256/apps/
+# Also copy icon to the binary directory for tray icon
+RUN cp qt-caster.png build/AppDir/usr/bin/icon.png
+
+# Copy Qt libraries
+RUN QT_LIB_DIR=/opt/Qt/6.5.0/gcc_64/lib && \
+    mkdir -p build/AppDir/usr/lib build/AppDir/usr/plugins && \
+    cp -d ${QT_LIB_DIR}/*.so* build/AppDir/usr/lib/ && \
+    cp -r /opt/Qt/6.5.0/gcc_64/plugins build/AppDir/usr/
+
+# Set rpath for binaries
+RUN patchelf --set-rpath '$ORIGIN/../lib' build/AppDir/usr/bin/qt-caster
+RUN patchelf --set-rpath '$ORIGIN/../lib' build/AppDir/usr/bin/qt-caster-worker
+
+# Copy GStreamer binary and plugins
+RUN GST_LAUNCH_PATH=$(which gst-launch-1.0) && \
+    if [ -z "$GST_LAUNCH_PATH" ]; then \
+    echo "gst-launch-1.0 not found!" && exit 1; \
+    fi && \
+    mkdir -p build/AppDir/usr/lib/x86_64-linux-gnu/gstreamer-1.0 && \
+    cp -r /usr/lib/x86_64-linux-gnu/gstreamer-1.0/* build/AppDir/usr/lib/x86_64-linux-gnu/gstreamer-1.0/ && \
+    cp /usr/lib/x86_64-linux-gnu/libgstreamer-1.0.so* build/AppDir/usr/lib/ && \
+    cp /usr/lib/x86_64-linux-gnu/libgstbase-1.0.so* build/AppDir/usr/lib/ && \
+    cp /usr/lib/x86_64-linux-gnu/libgstapp-1.0.so* build/AppDir/usr/lib/ && \
+    cp /usr/lib/x86_64-linux-gnu/libgstvideo-1.0.so* build/AppDir/usr/lib/ && \
+    cp /usr/lib/x86_64-linux-gnu/libgstaudio-1.0.so* build/AppDir/usr/lib/ && \
+    cp /usr/lib/x86_64-linux-gnu/libgstpbutils-1.0.so* build/AppDir/usr/lib/ && \
+    cp "$GST_LAUNCH_PATH" build/AppDir/usr/bin/ && \
+    patchelf --set-rpath '$ORIGIN/../lib' build/AppDir/usr/bin/gst-launch-1.0
+
+# Remove Quick3D libraries and plugins to avoid missing dependency
+RUN rm -rf build/AppDir/usr/lib/libQt6Quick3D* && \
+    rm -rf build/AppDir/usr/plugins/quick3d
+
+# Create AppRun wrapper that sets environment variables
+RUN cat > build/AppDir/AppRun << 'EOF'
+#!/bin/bash
+export GST_PLUGIN_PATH="$(dirname "$0")/usr/lib/x86_64-linux-gnu/gstreamer-1.0"
+export QT_PLUGIN_PATH="$(dirname "$0")/usr/plugins"
+exec "$(dirname "$0")/usr/bin/qt-caster" "$@"
+EOF
+RUN chmod +x build/AppDir/AppRun
+
+# Download and extract linuxdeploy and its plugins
+RUN wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /tmp/linuxdeploy.AppImage && \
+    chmod +x /tmp/linuxdeploy.AppImage && \
+    /tmp/linuxdeploy.AppImage --appimage-extract && \
+    mv -f squashfs-root /opt/linuxdeploy && \
+    ln -sf /opt/linuxdeploy/AppRun /usr/local/bin/linuxdeploy
+
+# Install linuxdeploy-plugin-qt
+RUN wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage -O /tmp/qt-plugin.AppImage && \
+    chmod +x /tmp/qt-plugin.AppImage && \
+    /tmp/qt-plugin.AppImage --appimage-extract && \
+    mv -f squashfs-root /opt/linuxdeploy-plugin-qt && \
+    ln -sf /opt/linuxdeploy-plugin-qt/AppRun /usr/local/bin/linuxdeploy-plugin-qt
+
+# Install appimagetool
+RUN wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool.AppImage && \
+    chmod +x /tmp/appimagetool.AppImage && \
+    /tmp/appimagetool.AppImage --appimage-extract && \
+    mv -f squashfs-root /opt/appimagetool && \
+    ln -sf /opt/appimagetool/AppRun /usr/local/bin/appimagetool
+
+# Run linuxdeploy to bundle remaining system dependencies
+RUN cd build && \
+    linuxdeploy --appdir AppDir --plugin qt
+
+# Generate the AppImage
+RUN cd build && \
+    appimagetool AppDir Qt-Caster-x86_64.AppImage
+
+# The resulting AppImage will be in /app/build/

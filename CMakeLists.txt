@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Multimedia DBus)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET
     gstreamer-1.0
@@ -22,6 +22,6 @@ target_link_libraries(qt-caster
 )
 
 target_link_libraries(qt-caster-worker
-    Qt6::Core Qt6::Widgets Qt6::Multimedia
+    Qt6::Core Qt6::Widgets Qt6::DBus
     PkgConfig::GST
 )

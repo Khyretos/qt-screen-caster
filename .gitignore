@@ -83,3 +83,4 @@ CMakeLists.txt.user*
 .qt
 CMakeFiles
 cmake_install.cmake
+/dist
