@@ -4,6 +4,8 @@ As a software engineer with limited C++ expertise, I directed the development of
 
 # 🎬 Qt-Caster Stream Manager
 
+![alt text](./qt-caster.png)
+
 **Qt-Caster** is a cross-platform GUI application for streaming your screen (video) and microphone/audio input (audio) over UDP using **GStreamer** and **PipeWire** (Linux) / platform‑specific capture APIs. It supports **custom stream names**, **hardware acceleration** (VAAPI, NVENC, QSV), **software fallback**, and **persistent pinned streams** that automatically start on launch.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
@@ -19,11 +21,14 @@ As a software engineer with limited C++ expertise, I directed the development of
 
 ### Video stream creation
 
-![alt text](./images/video-tream-creator.png)
+![alt text](./images/video-stream-creator.png)
+
+![alt text](./images/edit-video-stream.png)
 
 ### Audio stream creation
 
 ![alt text](/images/audio-stream-creator.png)
+![alt text](image-2.png)
 
 ## ✨ Features
 
