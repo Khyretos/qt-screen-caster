@@ -28,7 +28,8 @@ As a software engineer with limited C++ expertise, I directed the development of
 ### Audio stream creation
 
 ![alt text](/images/audio-stream-creator.png)
-![alt text](image-2.png)
+
+![alt text](/images/edit-audio-stream.png)
 
 ## ✨ Features
 
