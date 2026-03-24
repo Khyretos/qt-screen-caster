@@ -179,7 +179,8 @@ The repository includes a `Dockerfile.appimage` and a `build-appimage.sh` script
 
 The script builds the Docker image, compiles the application inside, and creates the AppImage. Once finished, the AppImage will be located in the dist/ folder inside the project root.
 
-**Note:** The AppImage bundles **everything** – Qt, GStreamer, and all required plugins. It runs on any modern Linux distribution **without** needing to install GStreamer or Qt separately. The first build may take a few minutes as it downloads the base image and dependencies. Subsequent builds will be faster due to Docker caching.
+**Note**  
+The AppImage bundles **everything** – Qt, GStreamer, and all required plugins. It runs on any modern Linux distribution **without** needing to install GStreamer or Qt separately. The first build may take a few minutes as it downloads the base image and dependencies. Subsequent builds will be faster due to Docker caching.
 
 ## 🚀 Usage
 
@@ -204,9 +205,12 @@ The script builds the Docker image, compiles the application inside, and creates
 
 4. For audio streams, you can optionally enable **Create virtual sink** and provide a custom sink name. This creates a PulseAudio null sink and automatically routes the stream through it, making the audio available to other applications.
 
-5. Click ✅ **Start.**
+**Notej**  
+The stream is automatically connected to the sink using `pw-link`, ensuring audio flows correctly. The sink's monitor source appears as a virtual microphone in applications like Discord.
 
-6. If streaming a screen, the PipeWire portal will appear – select a screen or window to capture.
+1. Click ✅ **Start.**
+
+2. If streaming a screen, the PipeWire portal will appear – select a screen or window to capture.
 
 ### Managing Streams
 
@@ -257,6 +261,7 @@ The file is plain JSON. You can edit it manually, but it’s easier to use the P
 | **AppImage doesn’t start**                                        | Ensure it’s executable (`chmod +x`). If on an older distribution, try building with an older GLIBC.                                               |
 | **No system tray icon**                                           | Some desktop environments (e.g., GNOME) do not support system trays. The app still works; use the window directly.                                |
 | **PipeWire portal does not appear**                               | Install `xdg-desktop-portal` and `xdg-desktop-portal-gtk` (or `-kde`). Restart session.                                                           |
+| **Virtual sink not showing in applications** | Install `pipewire-utils` (or `pipewire-bin`) which provides `pw-link`. Ensure the stream is running and check `pw-link -l` to see active connections. |
 
 ## 🤝 Contributing
 

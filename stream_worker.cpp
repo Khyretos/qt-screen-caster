@@ -1,5 +1,5 @@
-// stream_worker.cpp - xdg-desktop-portal D-Bus screen capture (no
-// QScreenCapture)
+// stream_worker.cpp - xdg-desktop-portal D-Bus screen capture with PipeWire
+// linking
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QCoreApplication>
@@ -193,6 +193,7 @@ public:
 
 private slots:
   void cleanupAllProcesses();
+  void connectPipeWireNodes(); // NEW: explicit connection via pw-link
 
 private:
   void startVideoStream();
@@ -202,13 +203,13 @@ private:
   void launchGStreamerVideo(const QString &nodeId);
   void setupSignalHandlers();
   int createVirtualSink(const QString &sinkName);
-  void removeVirtualSink(int moduleIndex);
+  void removeVirtualSink();
 
   QJsonObject config;
   QString streamType;
   QString streamName;
   QProcess *gstProcess;
-  int virtualSinkModule;         // -1 if none
+  int virtualSinkModule;         // module index of the null sink (virtual)
   QString virtualSinkActualName; // actual name used for the sink
 };
 
@@ -263,8 +264,7 @@ void StreamWorker::cleanupAllProcesses() {
   }
 
   if (virtualSinkModule != -1) {
-    removeVirtualSink(virtualSinkModule);
-    virtualSinkModule = -1;
+    removeVirtualSink();
   }
 }
 
@@ -280,7 +280,7 @@ void StreamWorker::start() {
 }
 
 // ======================================================================
-// Video – uses D-Bus portal (no QScreenCapture / no FFmpeg backend)
+// Video – uses D-Bus portal
 // ======================================================================
 void StreamWorker::startVideoStream() {
   qDebug() << "🎥 Starting video stream:" << streamName;
@@ -291,7 +291,6 @@ void StreamWorker::startVideoStream() {
 
   connect(portal, &PortalScreenCast::nodeReady, this,
           [this, portal](const QString &nodeId) {
-            // Output node ID to stdout and stderr for main app to capture
             std::cout << "NODE_ID: " << nodeId.toStdString() << std::endl;
             qDebug() << "NODE_ID:" << nodeId;
             portal->deleteLater();
@@ -308,9 +307,6 @@ void StreamWorker::startVideoStream() {
   portal->requestCapture();
 }
 
-// ======================================================================
-// GStreamer Video Pipeline
-// ======================================================================
 void StreamWorker::launchGStreamerVideo(const QString &nodeId) {
   qDebug() << "🚀 Launching GStreamer for video stream:" << streamName
            << "node:" << nodeId;
@@ -381,11 +377,8 @@ void StreamWorker::launchGStreamerVideo(const QString &nodeId) {
           QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
           [this](int code, QProcess::ExitStatus status) {
             qDebug() << "🏁 GStreamer finished:" << code << status;
-            // Ensure virtual sink is removed if it was created for audio (not
-            // for video)
             if (virtualSinkModule != -1) {
-              removeVirtualSink(virtualSinkModule);
-              virtualSinkModule = -1;
+              removeVirtualSink();
             }
             QApplication::exit(code);
           });
@@ -409,18 +402,25 @@ void StreamWorker::startAudioStream() {
 }
 
 int StreamWorker::createVirtualSink(const QString &sinkName) {
-  // Generate a unique name if none provided
   QString name = sinkName;
   if (name.isEmpty()) {
-    name = QString("qt-caster-%1").arg(streamName);
-    // Ensure name is valid for PulseAudio (alphanumeric, underscore, dash)
+    name = QString("%1").arg(streamName);
     name.replace(QRegularExpression("[^a-zA-Z0-9_-]"), "_");
   }
   virtualSinkActualName = name;
 
+  // Set sink properties (playback) and source properties (monitor)
+  QString sinkProps =
+      "node.description='" + name + "', media.class=Audio/Source/Virtual";
+  QString sourceProps = "node.description='" + name +
+                        " Monitor', media.class=Audio/Source/Virtual";
+
   QProcess pactl;
   pactl.start("pactl", QStringList() << "load-module" << "module-null-sink"
-                                     << "sink_name=" + name);
+                                     << "sink_name=" + name
+                                     << "sink_properties=" + sinkProps
+                                     << "source_properties=" + sourceProps
+                                     << "channels=2");
   if (!pactl.waitForStarted() || !pactl.waitForFinished()) {
     qWarning() << "Failed to create virtual sink with pactl";
     return -1;
@@ -436,17 +436,67 @@ int StreamWorker::createVirtualSink(const QString &sinkName) {
   return -1;
 }
 
-void StreamWorker::removeVirtualSink(int moduleIndex) {
-  if (moduleIndex <= 0)
+void StreamWorker::removeVirtualSink() {
+  if (virtualSinkModule == -1)
     return;
+
   QProcess pactl;
-  pactl.start("pactl", QStringList()
-                           << "unload-module" << QString::number(moduleIndex));
+  pactl.start("pactl", QStringList() << "unload-module"
+                                     << QString::number(virtualSinkModule));
   if (pactl.waitForStarted() && pactl.waitForFinished()) {
-    qDebug() << "✅ Removed virtual sink module" << moduleIndex;
+    qDebug() << "✅ Removed virtual sink module" << virtualSinkModule;
   } else {
-    qWarning() << "Failed to remove virtual sink module" << moduleIndex;
+    qWarning() << "Failed to remove virtual sink module" << virtualSinkModule;
   }
+  virtualSinkModule = -1;
+}
+
+void StreamWorker::connectPipeWireNodes() {
+  if (virtualSinkModule == -1)
+    return;
+
+  int channels = config["channels"].toInt();
+  if (channels <= 0)
+    channels = 2; // fallback
+
+  // Wait for both nodes to appear in the graph
+  QTimer::singleShot(500, this, [this, channels]() {
+    QString clientName = streamName;
+    QString sinkName = virtualSinkActualName;
+
+    // Channel suffixes based on common PulseAudio naming
+    QStringList suffixes;
+    if (channels == 1) {
+      suffixes << "FL"; // Mono often uses FL, but could be MONO; try FL first
+    } else if (channels == 2) {
+      suffixes << "FL" << "FR";
+    } else if (channels == 6) { // 5.1
+      suffixes << "FL" << "FR" << "FC" << "LFE" << "RL" << "RR";
+    } else {
+      // Generic: use standard suffixes for up to 8 channels
+      suffixes << "FL" << "FR" << "FC" << "LFE" << "RL" << "RR" << "RLC"
+               << "RRC";
+      suffixes = suffixes.mid(0, channels);
+    }
+
+    for (const QString &suffix : suffixes) {
+      QString source = QString("%1:output_%2").arg(clientName).arg(suffix);
+      QString sink = QString("%1:input_%2").arg(sinkName).arg(suffix);
+
+      QProcess pwlink;
+      pwlink.start("pw-link", QStringList() << source << sink);
+      if (pwlink.waitForStarted() && pwlink.waitForFinished()) {
+        if (pwlink.exitCode() == 0) {
+          qDebug() << "✅ Connected" << source << "→" << sink;
+        } else {
+          qWarning() << "Failed to connect" << source << "→" << sink << ":"
+                     << pwlink.readAllStandardError();
+        }
+      } else {
+        qWarning() << "Failed to start pw-link for" << source;
+      }
+    }
+  });
 }
 
 void StreamWorker::startIncomingAudioStream() {
@@ -474,6 +524,7 @@ void StreamWorker::startIncomingAudioStream() {
   int latencyTime = config["latencyTime"].toInt(0);
   int bufferTime = config["bufferTime"].toInt(0);
   int bufferSize = config["bufferSize"].toInt(0);
+  int sampleRate = config["sampleRate"].toInt();
 
   QStringList args;
   args << "udpsrc" << QString("port=%1").arg(port)
@@ -482,7 +533,8 @@ void StreamWorker::startIncomingAudioStream() {
     args << QString("buffer-size=%1").arg(bufferSize);
 
   if (codec == "opus") {
-    args << "caps=application/x-rtp,media=audio,encoding-name=OPUS"
+    args << "caps=\"application/x-rtp, media=audio,encoding-name=OPUS, "
+            "clock-rate=48000, payload=96\""
          << "!" << "rtpopusdepay" << "!" << "opusdec"
          << "!" << "audioconvert" << "!" << "audioresample";
   } else if (codec == "aac") {
@@ -495,12 +547,12 @@ void StreamWorker::startIncomingAudioStream() {
     return;
   }
 
-  // Add a queue before the sink to avoid latency warnings
+  // Add queues to avoid latency warnings
   args << "!" << "queue" << "max-size-buffers=0" << "max-size-time=0"
        << "!" << "queue" << "leaky=2" << "max-size-buffers=10"
        << "max-size-time=0";
 
-  // Determine sink to use
+  // Output to the created virtual sink or a user‑specified device
   if (createVirtual) {
     args << "!" << "pulsesink"
          << QString("device=%1").arg(virtualSinkActualName);
@@ -532,7 +584,6 @@ void StreamWorker::startIncomingAudioStream() {
           QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
           [this](int code, QProcess::ExitStatus status) {
             qDebug() << "🏁 Incoming GStreamer finished:" << code << status;
-            // Virtual sink will be cleaned up in cleanupAllProcesses
             QApplication::exit(code);
           });
   connect(gstProcess, &QProcess::errorOccurred, [](QProcess::ProcessError err) {
@@ -541,12 +592,15 @@ void StreamWorker::startIncomingAudioStream() {
   });
 
   gstProcess->start("gst-launch-1.0", args);
+
+  if (createVirtual) {
+    connectPipeWireNodes();
+  }
 }
 
 void StreamWorker::startPulseAudioStream() {
   qDebug() << "📤 Starting outgoing audio stream:" << streamName;
 
-  // Create virtual sink if requested
   bool createVirtual = config["virtualSink"].toBool(false);
   QString requestedSinkName = config["virtualSinkName"].toString();
   if (createVirtual) {
@@ -570,9 +624,9 @@ void StreamWorker::startPulseAudioStream() {
   int sampleRate = config["sampleRate"].toInt();
   int bufferSize = config["bufferSize"].toInt(0);
 
-  QStringList args; // <<<-- This line was missing
+  QStringList args;
 
-  // Determine source: if virtual sink created, use its monitor
+  // Use the monitor source of the virtual sink if created
   if (createVirtual) {
     args << "pulsesrc"
          << QString("device=%1.monitor").arg(virtualSinkActualName);
@@ -599,7 +653,6 @@ void StreamWorker::startPulseAudioStream() {
     return;
   }
 
-  // Add a queue before the sink to avoid latency warnings
   args << "!" << "queue" << "max-size-buffers=0" << "max-size-time=0";
 
   QStringList udpArgs;
